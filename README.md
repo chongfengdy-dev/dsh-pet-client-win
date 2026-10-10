@@ -55,8 +55,9 @@ Windows
 ```
 dsh-pet-client-win/
 ├─ scripts/
-│  ├─ install.ps1            部署：检查 Node/dsh → 装依赖 → 注册开机自启
+│  ├─ install.ps1            部署：检查 Node/dsh → 装依赖 → 同步插件 → 注册开机自启
 │  ├─ dsh-service.ps1        服务管理：start|stop|restart|status [web|term|all]
+│  ├─ sync-plugins.ps1       把 plugins\ 同步进 profile（-Check 只体检，-Restart 同步后重启）
 │  ├─ web-launch.ps1         dsh web 启动器（按标记决定是否走纯净模式）
 │  ├─ restart-web.ps1        异步重启 web（一键更新调用）
 │  ├─ dsh-mode.ps1           纯净/完整模式：clean|full|status
@@ -80,7 +81,7 @@ dsh-pet-client-win/
 前提：**Node 22+**（内置 zstd 需要）、全局 `dsh`（`npm i -g @deepseek-ai/dsh`）、Windows 10/11。
 
 ```powershell
-# 部署（装依赖 + 注册开机自启 + 立即启动）
+# 部署（装依赖 + 同步插件 + 注册开机自启 + 立即启动）
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Start
 
 # 打开界面
@@ -96,6 +97,8 @@ scripts\dsh-service.ps1 restart             # web + term 都重启
 scripts\dsh-mode.ps1 status                 # 当前模式
 scripts\dsh-mode.ps1 clean                  # 切纯净模式（剥离第三方插件，应急用）
 scripts\dsh-mode.ps1 full                   # 切回完整模式
+scripts\sync-plugins.ps1                    # 把 plugins\ 同步进 profile（改完插件源码后跑）
+scripts\sync-plugins.ps1 -Check             # 只体检插件是否滞后，不改动任何文件
 ```
 
 > 纯净模式下页面里没有终端/HUD/记忆等面板，但官方界面照常可用——用于「某个插件把页面搞坏了」时定位。
