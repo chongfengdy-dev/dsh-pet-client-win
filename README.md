@@ -1,56 +1,70 @@
 # DSH-Pet-Client-Win
 
-**Windows 原生版 pet 栈**：把 DeepSeek Harness 的界面后端与终端/HUD 服务完全搬到 Windows
-原生运行，**不依赖 WSL**。
+**Windows 原生版 DeepSeek Harness pet 栈**：把界面后端与终端 / HUD 服务完全跑在 Windows
+原生环境，**不依赖 WSL**。
 
-> 与 [`dsh-pet-client`](https://github.com/chongfengdy-dev/dsh-pet-client)（WSL/Linux 通用版）
-> 结构对称：同一套插件、同一个 3080/3081 端口约定、同一份 `~/.dsh` 会话与记忆，
-> 因此两边可随时对调，也能随时回退。
+姊妹项目：[`dsh-pet-client`](https://github.com/chongfengdy-dev/dsh-pet-client)（WSL / Linux 通用版）、
+[`dsh-pet-client-kde`](https://github.com/chongfengdy-dev/dsh-pet-client-kde)（Linux 托盘状态灯）。
 
-## 姊妹项目
+---
 
-| 项目 | 平台 | 形态 |
-|---|---|---|
-| [`dsh-pet-client`](https://github.com/chongfengdy-dev/dsh-pet-client) | WSL / Linux 通用 | dsh web + terminal-server + systemd + Nim 托盘壳 |
-| [`dsh-pet-client-kde`](https://github.com/chongfengdy-dev/dsh-pet-client-kde) | Linux 原生 | Qt6 托盘状态灯 |
-| **`dsh-pet-client-win`** | **Windows 原生** | **本项目** |
-| [`dsh-message-outline`](https://github.com/chongfengdy-dev/dsh-message-outline) | 跨平台 | 消息大纲插件（非 pet 系列） |
+## 一、项目来源
 
-## 组成
+本项目从 [`dsh-pet-client`](https://github.com/chongfengdy-dev/dsh-pet-client) 的 Windows 使用场景
+中独立出来：那套实现的后端（dsh web 与 terminal-server）依赖 WSL 提供 bash、systemd 与 Python，
+Windows 侧只能算个壳。2026-10-10 立项，把这两个服务原生化到 Windows，并保留与姊妹项目
+**同一套插件、同一套 3080 / 3081 端口约定、同一份 `~/.dsh` 会话与记忆**，两边可随时对调或回退。
 
-| 组件 | 端口 | 形态 |
-|---|---|---|
-| dsh web（profile: web） | **3080** | Node，由 `scripts\dsh-service.ps1` 托管（替代 systemd） |
-| terminal-server | **3081** | Node（`node-pty` 自带 win32-x64 预编译，无需重编） |
-| pet 壳 | — | 复用 `dsh-pet-client` 的 `dsh_client_full.exe`（Nim + winim 托盘状态灯） |
-| 对话界面 | — | 默认浏览器的 PWA 独立窗口（地址不变，无需改动） |
+为此做了四件平台替换（都是等价改写，不是重写功能）：
 
+| 原实现（WSL / Linux） | 本实现（Windows 原生） |
+|---|---|
+| systemd 托管服务（`dsh-web.service` / `dsh-terminal.service`） | PowerShell 服务层（`scripts\dsh-service.ps1`）+ 启动文件夹自启 |
+| 终端跑 `$SHELL`（bash） | 终端跑 `powershell.exe`（真 PTY，可换 shell） |
+| Python + `plyvel` 读浏览器 LevelDB 取平台 token | Node + `classic-level`（自带 win32-x64 预编译，读取结果与 plyvel **同指纹**） |
+| Python 脚本聚合会话词元 | Node 内置 zstd（按魔数切多帧解压，**零 Python 依赖**） |
+
+## 二、功能说明
+
+| 功能 | 说明 |
+|---|---|
+| **对话界面** | 浏览器 / PWA 打开 `http://127.0.0.1:3080`（dsh web，profile: web） |
+| **内嵌终端** | 页面右侧按钮开合，直连 3081 的 WebSocket；Windows 下开出的是 **PowerShell**（可用 `DSH_TERM_SHELL` 换成 `pwsh.exe` / `cmd.exe` 等） |
+| **Token HUD** | 常驻右上角：输入(命中/未命中) / 命中率 / 输出 / **今日消耗金额** / 余额；余额与金额走 DeepSeek 官方接口 |
+| **消息大纲** | 当前会话「我的消息」侧边导航（左缘横杠），hover 展开、点击跳转 |
+| **已归档会话** | 侧栏面板：查看 / 打开 / 恢复 / 删除会话 |
+| **宠物状态灯** | terminal-server 写 `%USERPROFILE%\pet-state.json`，托盘壳（`dsh_client_full.exe`）读取后变色：蓝=窗口可见 / 黑=收起 / 橙闪=有待处理提问 / 绿闪=回复完成 |
+| **纯净 / 完整模式** | `clean` 只留官方界面 + 认证同步（应急排查用），`full` 恢复全部插件 |
+| **一键更新** | 页面提示有新版本时点更新：自动 `npm i -g`，并通过 `DSH_RESTART_CMD` 异步重启界面后端 |
+| **开机自启** | 启动文件夹里的 `dsh-pet-client.vbs` 隐藏窗口拉起 3080 + 3081 |
+
+## 三、架构
+
+```mermaid
+graph TD
+    subgraph Windows 原生
+        A[dsh_client_full.exe<br/>托盘四色状态灯] -->|读 pet-state.json| D[%USERPROFILE%\pet-state.json]
+        B[PWA / 浏览器窗口<br/>http://127.0.0.1:3080] --> C[dsh-term-panels 插件<br/>终端面板 / Token HUD /<br/>消息大纲 / 已归档会话]
+        E[dsh web :3080<br/>dsh --profile web] --> B
+        F[terminal-server :3081<br/>server.js + node-pty] --> C
+        F -->|写入状态| D
+        F -->|fs 监控| S[(~/.dsh/sessions<br/>*.jsonl.zstd)]
+        E -->|会话记录| S
+    end
+    C -->|WebSocket /ws| F
+    C -->|HTTP /api/*| F
+    F -->|classic-level| L[(浏览器 Local Storage<br/>platform.deepseek.com token)]
+    F -->|HTTPS| P[platform.deepseek.com<br/>用量与金额]
+    F -->|HTTPS| Q[api.deepseek.com<br/>余额]
 ```
-Windows
-├─ dsh_client_full.exe ── 读 %USERPROFILE%\pet-state.json ── 托盘四色状态灯
-├─ PWA 窗口 ── http://127.0.0.1:3080
-│    └─ dsh-term-panels 插件（终端面板 / Token HUD / 消息大纲 / 已归档会话）
-├─ dsh web（3080，node --profile web）
-└─ terminal-server（3081，node）
-     ├─ WebSocket /ws   → PowerShell 真 PTY 终端
-     ├─ /api/today-usage → 聚合 ~/.dsh/sessions（Node 内置 zstd，多帧切分）
-     ├─ /api/platform-usage → 平台用量与金额（classic-level 读浏览器 token）
-     ├─ /api/balance     → 官方余额接口
-     └─ 写 pet-state.json → 宠物状态灯
-```
 
-## 与 WSL 版的关键差异
+**数据流**：插件在页面里渲染终端与 HUD → 通过 WebSocket / HTTP 连 3081 → 服务在本机跑
+PowerShell PTY、聚合会话记录、代理平台用量接口 → 宠物状态写入文件供托盘壳读取。
 
-| 主题 | WSL 版 | 本版 |
-|---|---|---|
-| 服务托管 | systemd（`dsh-web.service` / `dsh-terminal.service`） | `dsh-service.ps1` + 启动文件夹 `dsh-pet-client.vbs` |
-| 终端 shell | `$SHELL`（bash） | `powershell.exe`（可用 `DSH_TERM_SHELL` 覆盖） |
-| 平台 token 读取 | Python + `plyvel`（LevelDB） | Node + `classic-level`（零编译，读取结果与 plyvel **同指纹**） |
-| 词元聚合 | Python（`today-usage.py`） | Node（`lib/today-usage.js`，**零 Python 依赖**） |
-| 一键更新后重启 | `sudo systemctl restart dsh-web` | `DSH_RESTART_CMD` → `scripts\restart-web.ps1`（异步，避免 30s 超时） |
-| 不迁 | — | 微信通道(3082)、选股脚本 |
+**服务托管**：`scripts\dsh-service.ps1` 以后台隐藏窗口方式拉起两个 Node 进程，PID 记录在
+`run\*.pid`，停止时用 `taskkill /T` 杀进程树，并在杀之前校验命令行包含部署根路径（防 PID 复用误杀）。
 
-## 目录结构
+## 四、目录结构
 
 ```
 dsh-pet-client-win/
@@ -59,90 +73,116 @@ dsh-pet-client-win/
 │  ├─ dsh-service.ps1        服务管理：start|stop|restart|status [web|term|all]
 │  ├─ sync-plugins.ps1       把 plugins\ 同步进 profile（-Check 只体检，-Restart 同步后重启）
 │  ├─ web-launch.ps1         dsh web 启动器（按标记决定是否走纯净模式）
-│  ├─ restart-web.ps1        异步重启 web（一键更新调用）
-│  ├─ dsh-mode.ps1           纯净/完整模式：clean|full|status
-│  ├─ migrate-from-wsl.ps1   从 WSL 搬 profile / 插件 / 记忆（只读 WSL）
-│  └─ switch-to-win.ps1      正式切换：停 WSL 服务 → Windows 接管 3080/3081
+│  ├─ restart-web.ps1        异步重启 web（一键更新调用，避免 30 秒超时）
+│  ├─ dsh-mode.ps1           纯净 / 完整模式：clean|full|status
+│  ├─ migrate-from-wsl.ps1   从 WSL 搬 profile / 插件 / 记忆（只读 WSL，覆盖前自动备份）
+│  └─ switch-to-win.ps1      正式切换：停 WSL 服务 → Windows 接管 3080/3081，失败自动回滚
 ├─ config/
 │  └─ clean.patch.yml        纯净模式 patch（仅官方 base + web-app）
-├─ plugins/                  本地插件实体副本（不入库的是各自 node_modules）
+├─ plugins/                  本地插件实体副本（profile 内必须是真实目录副本，不能用符号链接）
 │  ├─ dsh-term-panels/       终端面板 / Token HUD / 消息大纲 / 已归档会话
 │  ├─ dsh-archive-sync/      归档集合变更即时同步
-│  └─ dsh-web-token-sync/    认证链接写入 %USERPROFILE%\.dsh\dsh-web-token.txt
-├─ terminal-server/          3081 服务（Node，零 Python）
+│  └─ dsh-web-token-sync/    把带 token 的认证链接写入 %USERPROFILE%\.dsh\dsh-web-token.txt
+├─ terminal-server/          :3081 服务（Node，零 Python 依赖）
 │  ├─ server.js
-│  └─ lib/                   platform-token / today-usage / ask-pending / zstd-frames
+│  └─ lib/
+│     ├─ platform-token.js   读浏览器 Local Storage 里的平台 token（classic-level）
+│     ├─ today-usage.js      聚合本地会话记录统计当日词元
+│     ├─ ask-pending.js      检测提问 / 审批待处理
+│     └─ zstd-frames.js      dsh 会话文件的多帧 zstd 切分解压
 ├─ logs/ · run/              运行时日志与 PID（不入库）
-└─ README.md · 使用说明.md
+├─ LICENSE                   MIT
+├─ README.md                 本文档
+└─ 使用说明.md                面向使用者的操作说明
 ```
 
-## 快速开始
+## 五、部署
 
-前提：**Node 22+**（内置 zstd 需要）、全局 `dsh`（`npm i -g @deepseek-ai/dsh`）、Windows 10/11。
+### 前置条件
+
+- **Windows 10 / 11**
+- **Node.js 22+**（词元统计用到内置 zstd；`install.ps1` 会检查并提示）
+- 全局 dsh：`npm i -g @deepseek-ai/dsh`
+
+### 安装
 
 ```powershell
-# 部署（装依赖 + 同步插件 + 注册开机自启 + 立即启动）
+# 解压后在项目目录执行
 powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Start
-
-# 打开界面
-start http://127.0.0.1:3080
 ```
 
-日常管理：
+脚本依次做五件事：检查 Node → 检查全局 dsh → 安装 `terminal-server` 依赖 →
+把 `plugins\` 同步进 web profile → 注册开机自启；`-Start` 表示装完立即启动。
+加 `-NoAutostart` 可只装依赖、不动自启。
+
+安装后打开 <http://127.0.0.1:3080>。
+
+> 建议把 3080 装成 PWA（浏览器地址栏右侧「安装」图标）：独立窗口没有地址栏，
+> 托盘状态灯也会优先跟随 PWA 窗口变色。
+> dsh web 要求 token 认证时，带 token 的链接会自动写到
+> `%USERPROFILE%\.dsh\dsh-web-token.txt`，直接打开文件里的链接即可。
+
+### 日常管理
 
 ```powershell
 scripts\dsh-service.ps1 status              # 两个服务的运行状态
-scripts\dsh-service.ps1 restart term        # 只重启终端服务
 scripts\dsh-service.ps1 restart             # web + term 都重启
+scripts\dsh-service.ps1 restart term        # 只重启终端服务
 scripts\dsh-mode.ps1 status                 # 当前模式
-scripts\dsh-mode.ps1 clean                  # 切纯净模式（剥离第三方插件，应急用）
+scripts\dsh-mode.ps1 clean                  # 切纯净模式（剥离第三方插件）
 scripts\dsh-mode.ps1 full                   # 切回完整模式
-scripts\sync-plugins.ps1                    # 把 plugins\ 同步进 profile（改完插件源码后跑）
-scripts\sync-plugins.ps1 -Check             # 只体检插件是否滞后，不改动任何文件
+scripts\sync-plugins.ps1                    # 改完 plugins\ 源码后同步进 profile
+scripts\sync-plugins.ps1 -Check             # 只体检插件是否滞后，不改动文件
 ```
 
-> 纯净模式下页面里没有终端/HUD/记忆等面板，但官方界面照常可用——用于「某个插件把页面搞坏了」时定位。
-
-## 从 WSL 迁移过来
+### 从 WSL 迁移 / 回退
 
 ```powershell
-# 1) 先搬数据（只读 WSL，覆盖前自动备份到 .dsh\.migrate-backup-<时间戳>\）
+# 1) 先搬数据（只读 WSL；覆盖前备份到 .dsh\.migrate-backup-<时间戳>\）
 powershell -ExecutionPolicy Bypass -File scripts\migrate-from-wsl.ps1
 
 # 2) 确认 Windows 侧能独立跑起来后，再正式切换端口
 powershell -ExecutionPolicy Bypass -File scripts\switch-to-win.ps1 -WaitSeconds 15
+
+# 回退：把标准端口还给 WSL
+powershell -ExecutionPolicy Bypass -File scripts\switch-to-win.ps1 -Rollback
 ```
 
-`switch-to-win.ps1` 会：停 WSL 侧 `dsh-web`(3080)/`terminal-server`(3081) → 停 Windows 测试实例
-→ 以默认端口启动 → 注册自启 → 任一步失败自动回滚（重新拉起 WSL 服务）。
-`-Rollback` 可手动回滚。
+切换会停掉 WSL 侧的 3080 / 3081 并让 Windows 接管，**当前页面会断一次**，请挑不忙的时候做。
+迁移与切换都不会删除 WSL 侧数据。
 
-> **注意**：切换会把当前页面（3080）换成 Windows 侧进程，请挑不忙的时候做。
-> 另外脚本停 WSL 服务用的是 `pkill`，对 systemd 托管的单元无效（会被 `Restart` 策略拉回），
-> 且启动校验只看「端口是否在监听」——详见下方「已知事项」。
+## 六、构建与编译
 
-## 已知事项
+**本项目没有编译步骤** —— 服务层是纯 Node / PowerShell，解压即可用：
 
-1. **`switch-to-win.ps1` 的两处缺陷（未修）**
-   - 用 `pkill -f 'terminal-server/server.js'` 停 WSL 服务：若该服务由 systemd 托管，
-     会被 `Restart=` 策略秒速拉回 → Windows 侧启动报 `EADDRINUSE`。应改用
-     `systemctl --user stop dsh-terminal`。
-   - 启动校验只判断「端口在监听」，没验证「端口持有者是不是自己刚起的进程」，
-     于是会把他人的占用误判为启动成功、跳过回滚。应改为比对 `Start-Process` 的 PID。
-2. **`platform-token.json` 缺失可自愈**（2026-10-10 已实现）
-   该文件由浏览器 LevelDB 读出、且被 `.gitignore` 忽略，新机器上天然不存在。
-   现在 `/api/platform-usage` 在读到空 token 时会先自动去浏览器抓一次再重试，
-   HUD 的「今日消耗」金额不会因此空掉。
-3. **沙箱/受限环境下的诊断**：`Get-NetTCPConnection`、`Get-CimInstance` 可能静默失效，
-   查端口请用 `netstat -ano`。
+- `terminal-server` 依赖通过 `npm ci` / `npm install` 安装（实测全新安装 **85 个包、约 17 秒**）；
+- 涉及原生模块的两个依赖都**自带 win32-x64 预编译**，**不需要 VS Build Tools**：
+  `node-pty`（终端 PTY）与 `classic-level`（读浏览器 LevelDB）；
+- 前端部分由 dsh web 在启动时自行编译 bundle（首次启动较慢，属正常现象）。
 
-## 状态
+**托盘壳 `dsh_client_full.exe`** 不在本仓库：它以 Nim + winim 编写，源码在姊妹项目
+[`dsh-pet-client`](https://github.com/chongfengdy-dev/dsh-pet-client)（`dsh_client_full.nim`），
+编译也在 Windows 侧进行（`build_and_install.bat`）。本项目直接复用该 exe —— 它只读
+`%USERPROFILE%\pet-state.json`，与后端通过文件解耦，因此无需改动。
 
-- **2026-10-10**：迁移完成并接管标准端口（3080 / 3081 全 Windows 原生，微信通道停用，
-  WSL 侧服务已停用并取消自启，WSL 数据保留未删）。
-- 已实测：界面后端、终端 PTY、Token HUD（词元 / 金额 / 余额）、消息大纲、已归档会话、
-  宠物状态灯、纯净/完整模式切换、一键更新链路。
+## 七、注意事项
 
-## License
+- **端口**：3080（界面后端）、3081（终端 / HUD / 状态）。两者被占时服务会启动失败，
+  日志见 `logs\web.err.log`、`logs\term.err.log`（常见 `EADDRINUSE`）。
+- **受限环境下的诊断**：`Get-NetTCPConnection`、`Get-CimInstance` 在沙箱 / 受限令牌下可能
+  静默返回空，导致 `dsh-service.ps1 status` 误报 `stopped`。查端口请用 `netstat -ano`。
+- **新机器首次启动**：若本地还没有平台 token 缓存，HUD 金额会在启动后 5–8 秒内取不到
+  （首次需从浏览器 LevelDB 抓取），随后自动恢复；token 落盘后不再出现。
+- **`switch-to-win.ps1` 的前置条件**：它用 `pkill` 停 WSL 侧 terminal-server。若该服务由
+  systemd 单元托管，会被 `Restart=` 策略拉回，导致 Windows 侧报 `EADDRINUSE`。
+  执行前请先在 WSL 里 `systemctl --user stop dsh-terminal && systemctl --user disable dsh-terminal`。
 
-MIT（与 `dsh-pet-client` 一致）
+## 八、版本历史
+
+| 版本 | 日期 | 说明 |
+|---|---|---|
+| **v1.0** | 2026-10-10 | 首个 Windows 原生版本。dsh web(3080) 与 terminal-server(3081) 完成原生化并接管标准端口；terminal-server 零 Python 依赖（classic-level 读 token、Node 多帧 zstd 统计词元）；PowerShell 服务层（`dsh-service.ps1`）替代 systemd；插件随包发布并提供 `sync-plugins.ps1`；平台 token 缺失自愈（HUD 金额不再空）；一键更新改为异步重启。WSL 侧服务同步停用（数据保留）。 |
+
+## 九、许可证
+
+[MIT](LICENSE) —— 与 `dsh-pet-client` 一致。
