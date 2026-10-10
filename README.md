@@ -1,4 +1,4 @@
-# DSH-Pet-Client-Win
+﻿# DSH-Pet-Client-Win
 
 **Windows 原生版 DeepSeek Harness pet 客户端** —— 托盘客户端 + 界面后端 + 终端/HUD 服务
 完整一套，全部跑在 Windows 原生环境，**不依赖 WSL**。
@@ -131,7 +131,7 @@ DSH-Pet-Client-Win-v1.0/
 | 2 | 检查全局 dsh，**缺失则自动 `npm i -g @deepseek-ai/dsh`** |
 | 3 | 安装 `terminal-server` 依赖（85 个包，约 17 秒，原生模块自带预编译） |
 | 4 | 把 `plugins\` 下 3 个插件同步进 web profile |
-| 5 | 部署托盘客户端到 `桌面\DSH-Pet-Client\` 并注册其开机自启 |
+| 5 | 部署托盘客户端到**桌面根目录**并注册其开机自启 |
 | 6 | 注册服务开机自启（启动文件夹的 `dsh-pet-client.vbs`） |
 
 **用户不需要编译任何东西**：客户端 exe 已随包分发。

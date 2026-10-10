@@ -110,9 +110,11 @@ if (-not (Test-Path $exeSrc)) {
   Write-Warning '  未找到客户端 exe（源码在 client\）—— 发布包应当自带；自行编译可跑 scripts\build-client.ps1'
 } else {
   $desktop = [Environment]::GetFolderPath('Desktop')
-  $clientDir = if ($desktop) { Join-Path $desktop 'DSH-Pet-Client' } else { Join-Path $Root 'client' }
-  if (-not (Test-Path $clientDir)) { New-Item -ItemType Directory $clientDir -Force | Out-Null }
-  $exeDst = Join-Path $clientDir 'dsh_client_full.exe'
+  # 客户端 exe 直接放桌面根目录，不建子文件夹（主 2026-10-10 定）。
+  # 桌面不可用时回落到项目内 client\。
+  $exeDst = if ($desktop) { Join-Path $desktop 'dsh_client_full.exe' } else { Join-Path $Root 'client\dsh_client_full.exe' }
+  # 早期版本部署在 桌面\DSH-Pet-Client\ 下；换位置后清掉旧副本，避免两个 exe 并存。
+  $legacyExe = if ($desktop) { Join-Path $desktop 'DSH-Pet-Client\dsh_client_full.exe' } else { $null }
 
   # 覆盖前先结束正在运行的客户端：exe 被占用时无法替换（升级/重装必踩），
   # 记下它本来在运行，替换完再拉起来，用户无感。
@@ -128,6 +130,11 @@ if (-not (Test-Path $exeSrc)) {
     Write-Host ('  已部署: ' + $exeDst)
   } catch {
     Write-Warning ('  客户端复制失败（可能仍被占用）：' + $_.Exception.Message)
+  }
+
+  if ($legacyExe -and ($legacyExe -ne $exeDst) -and (Test-Path $legacyExe)) {
+    Remove-Item $legacyExe -Force -ErrorAction SilentlyContinue
+    Write-Host ('  已清理旧位置副本: ' + $legacyExe)
   }
 
   if ($wasRunning) {
