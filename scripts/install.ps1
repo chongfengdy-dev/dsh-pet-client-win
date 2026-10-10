@@ -110,11 +110,10 @@ if (-not (Test-Path $webProfile)) {
 
 if (Test-Path $webProfile) {
   if (Test-Path $syncScript) {
-    & $syncScript
-    # 插件是刚写进 profile 的，而 dsh web 在同步之前就已启动 —— 必须重启一次才会加载它们，
-    # 否则用户打开页面依然看不到终端 / HUD / 大纲 / 已归档。
-    Write-Host '  重启 dsh web 让插件生效 ...'
-    & (Join-Path $Root 'scripts\dsh-service.ps1') restart web
+    # 用 -Restart 而不是在这里无条件重启：sync-plugins.ps1 只在「确实有插件被写进 profile」
+    # 时才重启 dsh web。插件是在 web 启动之后才落地的，不重启不会被加载；
+    # 但已装好的用户重复安装时不该白重启一次（会断掉正在看的页面）。
+    & $syncScript -Restart
   } else {
     Write-Warning ('  未找到同步脚本: ' + $syncScript)
   }
