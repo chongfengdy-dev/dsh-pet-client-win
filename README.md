@@ -3,7 +3,7 @@
 **Windows 原生版 DeepSeek Harness pet 客户端** —— 托盘客户端 + 界面后端 + 终端/HUD 服务
 完整一套，全部跑在 Windows 原生环境，**不依赖 WSL**。
 
-姊妹项目：[`dsh-pet-client`](https://github.com/chongfengdy-dev/dsh-pet-client)（WSL + WIN 版）、
+姊妹项目：[`dsh-pet-client`](https://github.com/chongfengdy-dev/dsh-pet-client)（WSL / Linux 通用版）、
 [`dsh-pet-client-kde`](https://github.com/chongfengdy-dev/dsh-pet-client-kde)（Linux 托盘状态灯）。
 
 > **发布包已自带客户端 exe**：拿到 `DSH-Pet-Client-Win-*-share.zip` 的人
@@ -20,7 +20,7 @@
 
 后端原生化为四处等价替换（改写平台层，功能逻辑不变）：
 
-| 原实现（WSL + WIN） | 本实现（Windows 原生） |
+| 原实现（WSL / Linux） | 本实现（Windows 原生） |
 |---|---|
 | systemd 托管服务（`dsh-web.service` / `dsh-terminal.service`） | PowerShell 服务层（`scripts\dsh-service.ps1`）+ 启动文件夹自启 |
 | 终端跑 `$SHELL`（bash） | 终端跑 `powershell.exe`（真 PTY，可换 shell） |
