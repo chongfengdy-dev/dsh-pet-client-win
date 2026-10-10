@@ -157,6 +157,15 @@ if (-not (Test-Path $exeSrc)) {
   try {
     Copy-Item $exeSrc $exeDst -Force -ErrorAction Stop
     Write-Host ('  已部署: ' + $exeDst)
+    # 部署根记录：客户端托盘菜单据此定位 scripts\ 下的脚本（避免在客户端里硬编码路径）
+    try {
+      if (-not (Test-Path $dshHome)) { New-Item -ItemType Directory $dshHome -Force | Out-Null }
+      $homeFile = Join-Path $dshHome 'dsh-pet-home.txt'
+      [IO.File]::WriteAllText($homeFile, $Root, (New-Object Text.UTF8Encoding $false))
+      Write-Host ('  已写入部署根记录: ' + $homeFile)
+    } catch {
+      Write-Warning ('  写部署根记录失败: ' + $_.Exception.Message)
+    }
   } catch {
     Write-Warning ('  客户端复制失败（可能仍被占用）：' + $_.Exception.Message)
   }

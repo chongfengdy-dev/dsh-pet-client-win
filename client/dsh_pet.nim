@@ -45,6 +45,8 @@ const
   ID_TRAY_CLEAN = 3         # 切换：纯净模式（复制指令）
   ID_TRAY_PET = 4           # 显示/隐藏宠物开关
   ID_TRAY_EXIT = 5
+  ID_TRAY_SVC_START = 6     # 2026-10-10 主：启动 dsh 服务（web + terminal-server）
+  ID_TRAY_SVC_STOP = 7      # 2026-10-10 主：关闭 dsh 服务
   SingleMutexName = "DSH-Nim-Client-SingleInstance"   # 单实例互斥（重复点击 exe 不叠开）
   ActivateEventName = "DSH-Nim-Client-ActivateEvent"  # 新实例通知老实例"呼出主窗口"的事件
 
@@ -163,49 +165,51 @@ proc openInBrowser() =
   if wurl != nil:
     discard ShellExecuteW(0, nil, wurl, nil, nil, SW_SHOW)
 
-proc openCmdDialog(cmd: string) =
-  ## 弹出对话框：显示需用户在 bash 运行的指令，并自动复制到剪贴板方便一键粘贴。
-  ## 用途：托盘一键切换纯净/完整 dsh 模式。因 dsh 在 WSL、切换需 sudo systemctl
-  ## restart（sudo 无免密），exe 无法直接执行，改为"复制指令给用户去终端跑"。
-  ## 复制指令到剪贴板（CF_UNICODETEXT）
-  # 打开剪贴板：传宿主窗口 hwnd 提高成功率；失败重试一次（托盘点击瞬时占用常见）
-  var clip = OpenClipboard(gHostHwnd)
-  if clip == 0:
-    sleep(50)
-    clip = OpenClipboard(gHostHwnd)
-  if clip == 0:
-    let mFail = toWs("打开剪贴板失败，请手动复制下面指令到 WSL bash（遇到提权输入密码）：\n\n" & cmd)
-    discard MessageBoxW(0, mFail, toWs("DSH 模式切换"), 0)
-    return
-  discard EmptyClipboard()
-  let bytes = (cmd.len + 1) * sizeof(WCHAR)
-  let hMem = GlobalAlloc(GMEM_MOVEABLE or GMEM_ZEROINIT, bytes)
-  if cast[pointer](hMem) != nil:
-    let p = cast[ptr UncheckedArray[WCHAR]](GlobalLock(hMem))
-    if p != nil:
-      # 复制 UTF-16 字节
-      var i = 0
-      for ch in cmd:
-        let wc = ord(ch)
-        p[i] = cast[WCHAR](wc)
-        inc(i)
-      p[cmd.len] = cast[WCHAR](0)
-      discard GlobalUnlock(hMem)
-      discard SetClipboardData(CF_UNICODETEXT, hMem)
-    discard CloseClipboard()
-  # MessageBox 显示指令（wstring 独立缓冲，converter 自动转 LPWSTR，避免 toW 静态缓冲覆盖）
-  let mBody = toWs("已复制以下指令到剪贴板，请在 WSL bash 运行（遇到提权提示输入密码）：\n\n" & cmd)
-  let mTitle = toWs("DSH 模式切换")
-  discard MessageBoxW(0, mBody, mTitle, 0)
+# ---- dsh 部署根定位与脚本执行（2026-10-10 主：托盘菜单直接调 Windows 版脚本）----
+proc dshHomePath(): string =
+  ## 部署根记在 <用户目录>\.dsh\dsh-pet-home.txt（install.ps1 部署客户端时写入），
+  ## 客户端据此定位 scripts\ 下的脚本 —— 不硬编码任何安装路径。
+  let f = getEnv("USERPROFILE") & "\\.dsh\\dsh-pet-home.txt"
+  try:
+    if fileExists(f): result = readFile(f).strip()
+  except CatchableError:
+    result = ""
+
+proc runDshScript(scriptRel, args: string): bool =
+  ## 以隐藏窗口调用部署根下的 PowerShell 脚本（不弹控制台黑框，无需用户去终端粘贴）。
+  let home = dshHomePath()
+  if home.len == 0:
+    discard MessageBoxW(0,
+      toWs("未找到 dsh 部署路径。\n\n请重新运行一次安装（安装.bat）—— 它会把部署根写入\n" &
+           getEnv("USERPROFILE") & "\\.dsh\\dsh-pet-home.txt"),
+      toWs("DSH 托盘"), 0)
+    return false
+  let script = home & "\\" & scriptRel
+  if not fileExists(script):
+    discard MessageBoxW(0,
+      toWs("找不到脚本：\n" & script & "\n\n部署目录可能被移动或删除了。"),
+      toWs("DSH 托盘"), 0)
+    return false
+  let params = "-NoProfile -ExecutionPolicy Bypass -File \"" & script & "\" " & args
+  dbg("run script: " & script & " " & args)
+  let r = ShellExecuteW(0, nil, toWs("powershell.exe"), toWs(params), toWs(home), SW_HIDE)
+  result = (cast[int](r) > 32)   # ShellExecuteW 约定：返回值 > 32 才算成功
+  if not result:
+    discard MessageBoxW(0,
+      toWs("执行失败（ShellExecute 返回 " & $(cast[int](r)) & "）：\n" & script & " " & args),
+      toWs("DSH 托盘"), 0)
 
 proc showTrayMenu(hwnd: HWND) =
   var hMenu = CreatePopupMenu()
   # v2.2：去掉「打开 DSH」菜单项（呼出/最小化走托盘左键与鲸鱼单击，菜单只留切换/宠物/退出）
-  discard AppendMenuW(hMenu, MF_STRING, ID_TRAY_FULL, toW("切换：完整模式（复制指令）"))
-  discard AppendMenuW(hMenu, MF_STRING, ID_TRAY_CLEAN, toW("切换：纯净模式（复制指令）"))
+  discard AppendMenuW(hMenu, MF_STRING, ID_TRAY_SVC_START, toW("启动 DSH 服务"))
+  discard AppendMenuW(hMenu, MF_STRING, ID_TRAY_SVC_STOP, toW("关闭 DSH 服务"))
+  discard AppendMenuW(hMenu, MF_SEPARATOR, 0, nil)
+  discard AppendMenuW(hMenu, MF_STRING, ID_TRAY_FULL, toW("切换：完整模式"))
+  discard AppendMenuW(hMenu, MF_STRING, ID_TRAY_CLEAN, toW("切换：纯净模式"))
   # 2026-10-07 主：悬浮宠物已去掉，菜单不再提供「显示/隐藏宠物」项
   discard AppendMenuW(hMenu, MF_SEPARATOR, 0, nil)
-  discard AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, toW("退出"))
+  discard AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, toW("退出托盘（服务继续运行）"))
   var pt: POINT
   discard GetCursorPos(pt.addr)
   discard SetForegroundWindow(hwnd)
@@ -344,11 +348,17 @@ proc wndProc(hwnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM): LRESULT {.s
     of ID_TRAY_OPENWEB:
       toggleDshApp()
       result = 0
+    of ID_TRAY_SVC_START:
+      discard runDshScript("scripts\\dsh-service.ps1", "start")
+      result = 0
+    of ID_TRAY_SVC_STOP:
+      discard runDshScript("scripts\\dsh-service.ps1", "stop")
+      result = 0
     of ID_TRAY_FULL:
-      openCmdDialog("sudo bash ~/deepseek-harness/nim-client/dsh-mode.sh full")
+      discard runDshScript("scripts\\dsh-mode.ps1", "full")
       result = 0
     of ID_TRAY_CLEAN:
-      openCmdDialog("sudo bash ~/deepseek-harness/nim-client/dsh-mode.sh clean")
+      discard runDshScript("scripts\\dsh-mode.ps1", "clean")
       result = 0
     of ID_TRAY_PET:
       # 显示/隐藏悬浮宠物（隐藏时停动画定时器省资源）
