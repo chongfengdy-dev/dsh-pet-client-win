@@ -138,14 +138,41 @@ function Start-Svc([string]$name) {
 function Stop-Svc([string]$name) {
   $def = Get-Def $name
   $live = Get-LivePid $name
-  if (-not $live) {
+  if ($live) {
+    & taskkill.exe /PID $live /T /F 2>&1 | Out-Null
     Remove-Item (Get-PidPath $name) -Force -ErrorAction SilentlyContinue
-    Write-Host ('[skip ] ' + $def.Label + ' 未在运行')
-    return
+    Write-Host ('[stop ] ' + $def.Label + ' (PID ' + $live + ')')
+  } else {
+    Remove-Item (Get-PidPath $name) -Force -ErrorAction SilentlyContinue
+    Write-Host ('[skip ] ' + $def.Label + ' 未按 PID 记录运行')
   }
-  & taskkill.exe /PID $live /T /F 2>&1 | Out-Null
-  Remove-Item (Get-PidPath $name) -Force -ErrorAction SilentlyContinue
-  Write-Host ('[stop ] ' + $def.Label + ' (PID ' + $live + ')')
+
+  # 兜底：按端口把仍在监听的 node 进程一并结束。
+  # 场景：进程不是本脚本启动的（手工跑的 dsh web、或 wrapper 退出后的孤儿进程），
+  # PID 记录里没有它，但端口确实占着 —— 主 2026-10-10 明确要求「关闭服务要关干净」。
+  # 用 netstat 解析而非 Get-NetTCPConnection：后者在受限环境下会静默失效。
+  $deadline = (Get-Date).AddSeconds(8)
+  while ((Get-Date) -lt $deadline) {
+    $listening = netstat -ano | Select-String ('127.0.0.1:' + $def.Port + '\s+0.0.0.0:0\s+LISTENING')
+    if (-not $listening) { break }
+    foreach ($l in $listening) {
+      $parts = @(($l.Line -split '\s+') | Where-Object { $_ -ne '' })
+      if ($parts.Count -lt 5) { continue }
+      $procId = 0
+      if (-not [int]::TryParse($parts[-1], [ref]$procId)) { continue }
+      $p = Get-Process -Id $procId -ErrorAction SilentlyContinue
+      if ($p -and $p.ProcessName -eq 'node') {
+        try {
+          Stop-Process -Id $procId -Force
+          Write-Host ('  [stop ] ' + $def.Label + ' 端口 ' + $def.Port + ' 的监听进程 PID ' + $procId + '（非本脚本启动，按端口清理）')
+        } catch { }
+      }
+    }
+    Start-Sleep -Milliseconds 500
+  }
+  if (netstat -ano | Select-String ('127.0.0.1:' + $def.Port + '\s+0.0.0.0:0\s+LISTENING')) {
+    Write-Warning ('  端口 ' + $def.Port + ' 仍被占用（占用者不是 node？）')
+  }
 }
 
 function Show-Status {

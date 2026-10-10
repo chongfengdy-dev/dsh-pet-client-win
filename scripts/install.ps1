@@ -179,7 +179,10 @@ if (-not (Test-Path $exeSrc)) {
 
   if ($wasRunning) {
     Write-Host '  重新启动客户端 ...'
-    Start-Process $exeDst
+    # 必须经 explorer 启动：直接 Start-Process 会让客户端挂在本进程组里，
+    # 于是「关闭 DSH 服务」杀掉 3080（dsh web）时进程组被清理，客户端会被连带杀掉
+    # （2026-10-10 主实测：点关闭服务后托盘直接消失）。
+    Start-Process explorer.exe -ArgumentList ('"' + $exeDst + '"')
   }
 
   if ($NoAutostart) {
@@ -202,7 +205,10 @@ if (-not (Test-Path $exeSrc)) {
     }
   }
 
-  if ($Start) { Write-Host '  启动客户端 ...'; Start-Process $exeDst }
+  if ($Start) {
+    Write-Host '  启动客户端 ...'
+    Start-Process explorer.exe -ArgumentList ('"' + $exeDst + '"')   # 同上：经 explorer 脱离进程组
+  }
 }
 
 # ---------- 6. 服务自启 ----------

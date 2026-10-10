@@ -5,7 +5,7 @@
 # (鲸鱼用途=提醒干活进度)。L 手势/窗口重建/token 交换等壳层逻辑全部移除。
 import winim
 import winim/inc/shellapi
-import strutils, os, math, random
+import strutils, os, math, random, net as dshnet
 
 # winmm 高精度定时器（winim 未封装，手动声明；60fps 动画需要）
 proc timeBeginPeriod(uPeriod: uint32): uint32 {.stdcall, dynlib: "winmm.dll", importc.}
@@ -165,6 +165,26 @@ proc openInBrowser() =
   if wurl != nil:
     discard ShellExecuteW(0, nil, wurl, nil, nil, SW_SHOW)
 
+proc isPortOpen(port: int): bool =
+  ## 本机端口是否有服务在监听 —— 托盘菜单据此置灰「启动/关闭 DSH 服务」。
+  ## 回环连接要么立刻成功、要么立刻被拒，不会阻塞菜单弹出。
+  var s: dshnet.Socket = nil
+  try:
+    s = dshnet.newSocket()
+    s.connect("127.0.0.1", dshnet.Port(port), 200)   # 200ms 超时：服务刚关闭时端口可能处于半关闭/残留状态，不设超时会把菜单卡住
+    result = true
+  except CatchableError:
+    result = false
+  finally:
+    if s != nil:
+      try: s.close() except CatchableError: discard
+
+# dsh 服务是否在运行 —— 托盘菜单置灰依据。
+# 主 2026-10-10：不在菜单弹出时探测端口（即使带超时也有可感知延迟），
+# 改由「启动/关闭」点击更新状态；客户端启动时探测一次做初值。
+# 注：必须在 showTrayMenu 之前声明（Nim 先声明后使用）。
+var gSvcRunning: bool = true
+
 # ---- dsh 部署根定位与脚本执行（2026-10-10 主：托盘菜单直接调 Windows 版脚本）----
 proc dshHomePath(): string =
   ## 部署根记在 <用户目录>\.dsh\dsh-pet-home.txt（install.ps1 部署客户端时写入），
@@ -190,20 +210,26 @@ proc runDshScript(scriptRel, args: string): bool =
       toWs("找不到脚本：\n" & script & "\n\n部署目录可能被移动或删除了。"),
       toWs("DSH 托盘"), 0)
     return false
-  let params = "-NoProfile -ExecutionPolicy Bypass -File \"" & script & "\" " & args
+  # 菜单命令的输出（含错误）追加到 <部署根>\logs\menu-cmd.log：
+  # 隐藏窗口执行时输出会被丢弃，出问题无法回溯（2026-10-10 排查「关闭服务后客户端退出」时踩到）。
+  let menuLog = home & "\\logs\\menu-cmd.log"
+  let psCmd = "& '" & script & "' " & args & " *>&1 | Out-File -FilePath '" & menuLog & "' -Append -Encoding utf8"
+  let params = "-NoProfile -ExecutionPolicy Bypass -Command \"" & psCmd & "\""
   dbg("run script: " & script & " " & args)
   let r = ShellExecuteW(0, nil, toWs("powershell.exe"), toWs(params), toWs(home), SW_HIDE)
   result = (cast[int](r) > 32)   # ShellExecuteW 约定：返回值 > 32 才算成功
-  if not result:
-    discard MessageBoxW(0,
-      toWs("执行失败（ShellExecute 返回 " & $(cast[int](r)) & "）：\n" & script & " " & args),
-      toWs("DSH 托盘"), 0)
+  # 主 2026-10-10：正常操作不弹任何窗口 —— 菜单置灰本身就是状态反馈
+  dbg("script result=" & $result & " shell=" & $(cast[int](r)))
 
 proc showTrayMenu(hwnd: HWND) =
   var hMenu = CreatePopupMenu()
   # v2.2：去掉「打开 DSH」菜单项（呼出/最小化走托盘左键与鲸鱼单击，菜单只留切换/宠物/退出）
-  discard AppendMenuW(hMenu, MF_STRING, ID_TRAY_SVC_START, toW("启动 DSH 服务"))
-  discard AppendMenuW(hMenu, MF_STRING, ID_TRAY_SVC_STOP, toW("关闭 DSH 服务"))
+  # 主 2026-10-10：按当前服务状态置灰 —— 服务在跑则「启动」不可点，反之「关闭」不可点
+  # 用内部状态而非端口探测：探测（即使带超时）也会让菜单有可感知延迟
+  let startFlags: UINT = if gSvcRunning: UINT(MF_STRING or MF_GRAYED) else: UINT(MF_STRING)
+  let stopFlags: UINT  = if gSvcRunning: UINT(MF_STRING) else: UINT(MF_STRING or MF_GRAYED)
+  discard AppendMenuW(hMenu, startFlags, ID_TRAY_SVC_START, toW("启动 DSH 服务"))
+  discard AppendMenuW(hMenu, stopFlags,  ID_TRAY_SVC_STOP, toW("关闭 DSH 服务"))
   discard AppendMenuW(hMenu, MF_SEPARATOR, 0, nil)
   discard AppendMenuW(hMenu, MF_STRING, ID_TRAY_FULL, toW("切换：完整模式"))
   discard AppendMenuW(hMenu, MF_STRING, ID_TRAY_CLEAN, toW("切换：纯净模式"))
@@ -350,9 +376,11 @@ proc wndProc(hwnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM): LRESULT {.s
       result = 0
     of ID_TRAY_SVC_START:
       discard runDshScript("scripts\\dsh-service.ps1", "start")
+      gSvcRunning = true          # 记住状态：菜单据此置灰，不再探测
       result = 0
     of ID_TRAY_SVC_STOP:
       discard runDshScript("scripts\\dsh-service.ps1", "stop")
+      gSvcRunning = false
       result = 0
     of ID_TRAY_FULL:
       discard runDshScript("scripts\\dsh-mode.ps1", "full")
@@ -865,6 +893,9 @@ when isMainModule:
     dbg("tray ok")
 
   # 悬浮鲸鱼（v2.2：无 WebView 主窗口，直接初始化宠物壳）
+  # 服务状态初值：只在客户端启动时探测一次（此后由点击启停维护，菜单弹出零探测）
+  gSvcRunning = isPortOpen(3080) or isPortOpen(3081)
+  dbg("svc running at startup: " & $gSvcRunning)
   dbg("before floatInit")
   floatInit()
   dbg("after floatInit")
