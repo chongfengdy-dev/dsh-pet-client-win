@@ -6,6 +6,9 @@
 姊妹项目：[`dsh-pet-client`](https://github.com/chongfengdy-dev/dsh-pet-client)（WSL / Linux 通用版）、
 [`dsh-pet-client-kde`](https://github.com/chongfengdy-dev/dsh-pet-client-kde)（Linux 托盘状态灯）。
 
+> **发布包已自带客户端 exe**：拿到 `DSH-Pet-Client-Win-*-share.zip` 的人
+> **不需要编译任何东西** —— 解压 → 双击 `安装.bat` → 打开 <http://127.0.0.1:3080>。
+
 ---
 
 ## 一、项目来源
@@ -37,7 +40,7 @@
 | **已归档会话** | 侧栏面板：查看 / 打开 / 恢复 / 删除会话 |
 | **纯净 / 完整模式** | `clean` 只留官方界面 + 认证同步（应急排查用），`full` 恢复全部插件 |
 | **一键更新** | 页面提示有新版本时点更新：自动 `npm i -g`，并通过 `DSH_RESTART_CMD` 异步重启界面后端 |
-| **开机自启** | 启动文件夹里的 `dsh-pet-client.vbs` 隐藏窗口拉起 3080 + 3081；客户端由托盘自启项拉起 |
+| **开机自启** | 服务由启动文件夹的 `dsh-pet-client.vbs` 隐藏拉起；客户端由 `HKCU\...\Run` 的 `DSH-Nim-Client` 拉起 |
 
 ## 三、架构
 
@@ -69,17 +72,19 @@ PowerShell PTY、聚合会话记录、代理平台用量接口 → 宠物状态�
 ## 四、目录结构
 
 ```
-dsh-pet-client-win/
-├─ client/                   托盘客户端（Nim + winim → 单文件 exe）
+DSH-Pet-Client-Win-v1.0/
+├─ 安装.bat                  ★ 双击即装（等价于 scripts\install.ps1 -Start）
+├─ client/                   托盘客户端
+│  ├─ dsh_client_full.exe    编译产物（发布包自带，免编译）
 │  ├─ dsh_client_full.nim    源码（仅依赖 winim 与标准库）
-│  ├─ assets/                图标资源（编译期 staticRead 内嵌，共 11 个文件）
-│  ├─ icon.rc · icon.res     exe 外壳图标资源
-│  └─ dsh_client_full.exe    编译产物（不入库）
+│  ├─ assets/                图标资源（编译期 staticRead 内嵌，11 个文件）
+│  └─ icon.rc · icon.res     exe 外壳图标资源
 ├─ scripts/
-│  ├─ install.ps1            部署：检查 Node/dsh → 装依赖 → 同步插件 → 注册开机自启
+│  ├─ install.ps1            部署：Node → dsh(缺失自动装) → 依赖 → 插件 → 客户端 → 自启
 │  ├─ dsh-service.ps1        服务管理：start|stop|restart|status [web|term|all]
 │  ├─ sync-plugins.ps1       把 plugins\ 同步进 profile（-Check 只体检，-Restart 同步后重启）
-│  ├─ build-client.ps1       编译托盘客户端（动态定位 Nim / MinGW / winim）
+│  ├─ build-client.ps1       从源码编译客户端（动态定位 Nim / MinGW / winim）
+│  ├─ pack-share.ps1         打包发布 zip（自带 exe + 敏感串扫描）
 │  ├─ web-launch.ps1         dsh web 启动器（按标记决定是否走纯净模式）
 │  ├─ restart-web.ps1        异步重启 web（一键更新调用，避免 30 秒超时）
 │  └─ dsh-mode.ps1           纯净 / 完整模式：clean|full|status
@@ -107,41 +112,47 @@ dsh-pet-client-win/
 ### 前置条件
 
 - **Windows 10 / 11**
-- **Node.js 22+**（词元统计用到内置 zstd；`install.ps1` 会检查并提示）
-- 全局 dsh：`npm i -g @deepseek-ai/dsh`
+- **Node.js 22+**（词元统计用到内置 zstd）—— **唯一需要用户自备的东西**：
+  没装的话 `install.ps1` 会检测到并给出下载地址
 
-### 安装
+### 三步装好（推荐）
 
-```powershell
-# 解压后在项目目录执行
-powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Start
+```
+1. 解压   DSH-Pet-Client-Win-v1.0-share.zip
+2. 双击   安装.bat
+3. 打开   http://127.0.0.1:3080
 ```
 
-脚本依次做五件事：检查 Node → 检查全局 dsh → 安装 `terminal-server` 依赖 →
-把 `plugins\` 同步进 web profile → 注册开机自启；`-Start` 表示装完立即启动。
-加 `-NoAutostart` 可只装依赖、不动自启。
+`安装.bat` 会自动跑完 `scripts\install.ps1 -Start`，也就是：
 
-安装后打开 <http://127.0.0.1:3080>。
+| 步骤 | 做什么 |
+|---|---|
+| 1 | 检查 Node 版本 |
+| 2 | 检查全局 dsh，**缺失则自动 `npm i -g @deepseek-ai/dsh`** |
+| 3 | 安装 `terminal-server` 依赖（85 个包，约 17 秒，原生模块自带预编译） |
+| 4 | 把 `plugins\` 下 3 个插件同步进 web profile |
+| 5 | 部署托盘客户端到 `桌面\DSH-Pet-Client\` 并注册其开机自启 |
+| 6 | 注册服务开机自启（启动文件夹的 `dsh-pet-client.vbs`） |
+
+**用户不需要编译任何东西**：客户端 exe 已随包分发。
+
+### 分步 / 手动方式
+
+```powershell
+# 只部署、不启动
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1
+
+# 部署后立即启动服务与客户端
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -Start
+
+# 只装依赖与插件，不碰任何开机自启
+powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -NoAutostart
+```
 
 > 建议把 3080 装成 PWA（浏览器地址栏右侧「安装」图标）：独立窗口没有地址栏，
 > 托盘状态灯也会优先跟随 PWA 窗口变色。
 > dsh web 要求 token 认证时，带 token 的链接会自动写到
 > `%USERPROFILE%\.dsh\dsh-web-token.txt`，直接打开文件里的链接即可。
-
-### 客户端（托盘状态灯）
-
-`client\dsh_client_full.exe` 是编译产物，**不入库**。两种取用方式：
-
-```powershell
-# A. 从源码编译（需要 Nim / MinGW / winim，见下一节）
-powershell -ExecutionPolicy Bypass -File scripts\build-client.ps1
-
-# B. 编译并立刻启动
-powershell -ExecutionPolicy Bypass -File scripts\build-client.ps1 -Run
-```
-
-客户端只做两件事：读 `%USERPROFILE%\pet-state.json` 显示托盘四色状态灯，
-以及左键呼出 / 最小化对话窗口（已装 PWA 则跟随 PWA 窗口，否则回落默认浏览器）。
 
 ### 日常管理
 
@@ -154,7 +165,6 @@ scripts\dsh-mode.ps1 clean                  # 切纯净模式（剥离第三方�
 scripts\dsh-mode.ps1 full                   # 切回完整模式
 scripts\sync-plugins.ps1                    # 改完 plugins\ 源码后同步进 profile
 scripts\sync-plugins.ps1 -Check             # 只体检插件是否滞后，不改动文件
-scripts\build-client.ps1                    # 重新编译托盘客户端
 ```
 
 ## 六、构建与编译
@@ -168,13 +178,16 @@ scripts\build-client.ps1                    # 重新编译托盘客户端
   `node-pty`（终端 PTY）与 `classic-level`（读浏览器 LevelDB）；
 - 前端部分由 dsh web 在启动时自行编译 bundle（首次启动较慢，属正常现象）。
 
-### 客户端：需要编译
+### 客户端：通常不需要编译
+
+发布包里已带 `client\dsh_client_full.exe`。只有改源码或想自己出包时才需要：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\build-client.ps1
+powershell -ExecutionPolicy Bypass -File scripts\build-client.ps1          # 编译
+powershell -ExecutionPolicy Bypass -File scripts\build-client.ps1 -Run     # 编译并启动
 ```
 
-脚本会自动定位工具链（都支持 PATH 或常见安装位置），不写死任何用户路径：
+脚本自动定位工具链（支持 PATH 或常见安装位置），不写死任何用户路径：
 
 | 依赖 | 要求 | 查找方式 |
 |---|---|---|
@@ -182,12 +195,22 @@ powershell -ExecutionPolicy Bypass -File scripts\build-client.ps1
 | **MinGW-w64** | 提供 `gcc.exe` | PATH，或 `C:\mingw64` / `C:\msys64\mingw64` / `<用户目录>\mingw64` |
 | **winim** | 3.9+ | `nimble install winim`（装到 `<用户目录>\.nimble\pkgs2\winim-*`） |
 
-编译采用 MinGW 静态链接（`--passL:-static`），产物是**单个 exe、零 DLL 依赖**；
-托盘图标与 exe 图标都已内嵌（前者由源码 `staticRead` 编译期嵌入，后者来自 `client\icon.res`）。
+编译采用 MinGW 静态链接，产物是**单个 exe、零 DLL 依赖**；托盘图标与 exe 图标都已内嵌。
 实测：**176,662 行 / 约 17 秒 / 587.7 KB**。
 
 > 链接阶段可能出现 `ld.exe: .rsrc merge failure: multiple non-default manifests`，
-> 这是资源段清单合并的提示，**不影响产物**（exe 正常生成且可运行）。
+> 这是资源段清单合并的提示，**不影响产物**。
+
+### 打发布包
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\pack-share.ps1                 # 出到桌面
+powershell -ExecutionPolicy Bypass -File scripts\pack-share.ps1 -Version v1.1   # 指定版本号
+```
+
+打包规则：文件清单以 `git ls-files` 为准（`.gitignore` 里的私密文件天然排除），
+再补上**客户端 exe**；打包前跑一遍敏感串扫描（`userToken` 实值、`/home/*`、`C:\Users\*`、
+`sk-`、`ghp_`、`DESKTOP-*`），命中即中止、不产出 zip。
 
 ## 七、注意事项
 
@@ -200,12 +223,14 @@ powershell -ExecutionPolicy Bypass -File scripts\build-client.ps1
 - **插件必须同步进 profile**：profile 内要的是**真实目录副本**，不能用符号链接
   （ESM 按真实路径解析依赖，链接过去会 `failed to import`）。
   改完 `plugins\` 下的源码后跑 `scripts\sync-plugins.ps1`，必要时再 `restart web`。
+- **重复安装是安全的**：`install.ps1` 会先结束正在运行的客户端再替换 exe，替换后自动拉起来；
+  依赖与插件都已就绪时会跳过。
 
 ## 八、版本历史
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
-| **v1.0** | 2026-10-10 | 首个 Windows 原生版本。后端（dsh web 3080 + terminal-server 3081）完成原生化并接管标准端口，terminal-server 零 Python 依赖（classic-level 读 token、Node 多帧 zstd 统计词元）；PowerShell 服务层（`dsh-service.ps1`）替代 systemd；**托盘客户端源码与资源并入本仓库**并提供 `build-client.ps1` 一键编译；插件随包发布并提供 `sync-plugins.ps1`；平台 token 缺失自愈（HUD 金额不再空）；一键更新改为异步重启。 |
+| **v1.0** | 2026-10-10 | 首个 Windows 原生版本。后端（dsh web 3080 + terminal-server 3081）完成原生化并接管标准端口，terminal-server 零 Python 依赖（classic-level 读 token、Node 多帧 zstd 统计词元）；PowerShell 服务层（`dsh-service.ps1`）替代 systemd；**托盘客户端源码与资源并入本仓库**，发布包自带编译好的 exe（`pack-share.ps1` 一键出包）；`安装.bat` + `install.ps1` 做到下载即用（缺 dsh 自动安装、插件自动同步、客户端自动部署并注册自启）；平台 token 缺失自愈（HUD 金额不再空）；一键更新改为异步重启。 |
 
 ## 九、许可证
 

@@ -1,19 +1,20 @@
 ﻿<#
   install.ps1 — DSH-Pet-Client-Win 部署脚本
 
-  做五件事：
+  做六件事：
     1. 检查 Node（内置 zstd 需要 Node >= 22）
-    2. 检查全局 dsh（界面后端依赖）
+    2. 检查全局 dsh，缺失则自动安装（npm i -g @deepseek-ai/dsh）
     3. 安装 terminal-server 的 npm 依赖
     4. 把本项目的插件同步进 web profile（终端面板 / Token HUD / 已归档会话都在这几个插件里）
-    5. 注册开机自启（启动文件夹里放一个隐藏窗口的 vbs）
+    5. 部署托盘客户端（复制 exe 并按需注册其开机自启）
+    6. 注册服务开机自启（启动文件夹里放一个隐藏窗口的 vbs）
 
   用法：
-    install.ps1                  部署 + 装自启
-    install.ps1 -NoAutostart     只装依赖，不动自启
-    install.ps1 -Start           装完立即启动服务
+    install.ps1                  完整部署
+    install.ps1 -NoAutostart     装依赖/插件，但不注册任何开机自启
+    install.ps1 -Start           装完立即启动服务（并启动客户端）
 
-  前提：本脚本应位于部署根下的 scripts\ 目录（即 %USERPROFILE%\dsh-pet-client-win\scripts\）。
+  前提：本脚本应位于部署根下的 scripts\ 目录。
 #>
 [CmdletBinding()]
 param(
@@ -29,7 +30,7 @@ Write-Host ('部署根: ' + $Root)
 Write-Host ''
 
 # ---------- 1. Node ----------
-Write-Host '[1/5] 检查 Node ...'
+Write-Host '[1/6] 检查 Node ...'
 $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
 if (-not $nodeCmd) {
   Write-Error '未找到 node —— 请先安装 Node.js 22+：https://nodejs.org'
@@ -43,8 +44,8 @@ if ($major -lt 22) {
   Write-Warning ('  Node ' + $nodeVer + ' 低于 22 —— 内置 zstd 不可用（今日用量统计会失效），建议升级')
 }
 
-# ---------- 2. dsh ----------
-Write-Host '[2/5] 检查 dsh ...'
+# ---------- 2. dsh（缺失则自动安装） ----------
+Write-Host '[2/6] 检查 dsh ...'
 function Find-DshBinJs {
   $cands = New-Object System.Collections.Generic.List[string]
   $appdata = if ($env:APPDATA) { $env:APPDATA } else { Join-Path $env:USERPROFILE 'AppData\Roaming' }
@@ -64,13 +65,21 @@ function Find-DshBinJs {
 }
 $dshBin = Find-DshBinJs
 if (-not $dshBin) {
-  Write-Warning '  未检测到全局 dsh —— 界面后端(3080)无法启动。请执行: npm i -g @deepseek-ai/dsh'
+  Write-Host '  未检测到全局 dsh，正在安装（npm i -g @deepseek-ai/dsh）...'
+  & npm install -g @deepseek-ai/dsh --no-audit --no-fund 2>&1 |
+    Select-Object -Last 3 | ForEach-Object { Write-Host ('    ' + $_) }
+  $dshBin = Find-DshBinJs
+  if ($dshBin) {
+    Write-Host ('  √ 已安装: ' + $dshBin)
+  } else {
+    Write-Warning '  安装后仍未找到 dsh —— 请手动执行: npm i -g @deepseek-ai/dsh'
+  }
 } else {
   Write-Host ('  ' + $dshBin)
 }
 
-# ---------- 3. 依赖 ----------
-Write-Host '[3/5] 安装 terminal-server 依赖 ...'
+# ---------- 3. terminal-server 依赖 ----------
+Write-Host '[3/6] 安装 terminal-server 依赖 ...'
 $termDir = Join-Path $Root 'terminal-server'
 if (-not (Test-Path $termDir)) { Write-Error ('缺少目录: ' + $termDir); exit 1 }
 if (Test-Path (Join-Path $termDir 'node_modules')) {
@@ -82,7 +91,7 @@ if (Test-Path (Join-Path $termDir 'node_modules')) {
 }
 
 # ---------- 4. 插件 ----------
-Write-Host '[4/5] 同步本地插件到 web profile ...'
+Write-Host '[4/6] 同步本地插件到 web profile ...'
 $syncScript = Join-Path $Root 'scripts\sync-plugins.ps1'
 $dshHome    = if ($env:DSH_HOME) { $env:DSH_HOME } else { Join-Path $env:USERPROFILE '.dsh' }
 $webProfile = Join-Path $dshHome 'profiles\web'
@@ -94,11 +103,60 @@ if (-not (Test-Path $webProfile)) {
   Write-Warning ('  未找到同步脚本: ' + $syncScript)
 }
 
-# ---------- 5. 自启 ----------
-if ($NoAutostart) {
-  Write-Host '[5/5] 跳过自启（-NoAutostart）'
+# ---------- 5. 客户端 ----------
+Write-Host '[5/6] 部署托盘客户端 ...'
+$exeSrc = Join-Path $Root 'client\dsh_client_full.exe'
+if (-not (Test-Path $exeSrc)) {
+  Write-Warning '  未找到客户端 exe（源码在 client\）—— 发布包应当自带；自行编译可跑 scripts\build-client.ps1'
 } else {
-  Write-Host '[5/5] 注册开机自启 ...'
+  $desktop = [Environment]::GetFolderPath('Desktop')
+  $clientDir = if ($desktop) { Join-Path $desktop 'DSH-Pet-Client' } else { Join-Path $Root 'client' }
+  if (-not (Test-Path $clientDir)) { New-Item -ItemType Directory $clientDir -Force | Out-Null }
+  $exeDst = Join-Path $clientDir 'dsh_client_full.exe'
+
+  # 覆盖前先结束正在运行的客户端：exe 被占用时无法替换（升级/重装必踩），
+  # 记下它本来在运行，替换完再拉起来，用户无感。
+  $wasRunning = [bool](Get-Process dsh_client_full -ErrorAction SilentlyContinue)
+  if ($wasRunning) {
+    Write-Host '  客户端正在运行，先结束它以便替换 ...'
+    & taskkill.exe /IM dsh_client_full.exe /F 2>&1 | Out-Null
+    Start-Sleep -Seconds 2
+  }
+
+  try {
+    Copy-Item $exeSrc $exeDst -Force -ErrorAction Stop
+    Write-Host ('  已部署: ' + $exeDst)
+  } catch {
+    Write-Warning ('  客户端复制失败（可能仍被占用）：' + $_.Exception.Message)
+  }
+
+  if ($wasRunning) {
+    Write-Host '  重新启动客户端 ...'
+    Start-Process $exeDst
+  }
+
+  if ($NoAutostart) {
+    Write-Host '  跳过客户端自启（-NoAutostart）'
+  } else {
+    $runKey  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    $desired = '"' + $exeDst + '"'
+    $current = (Get-ItemProperty $runKey -Name 'DSH-Nim-Client' -ErrorAction SilentlyContinue).'DSH-Nim-Client'
+    if ($current -ne $desired) {
+      Set-ItemProperty $runKey -Name 'DSH-Nim-Client' -Value $desired -Force
+      Write-Host '  已注册客户端开机自启（HKCU Run → DSH-Nim-Client）'
+    } else {
+      Write-Host '  客户端开机自启已存在'
+    }
+  }
+
+  if ($Start) { Write-Host '  启动客户端 ...'; Start-Process $exeDst }
+}
+
+# ---------- 6. 服务自启 ----------
+if ($NoAutostart) {
+  Write-Host '[6/6] 跳过服务自启（-NoAutostart）'
+} else {
+  Write-Host '[6/6] 注册服务开机自启 ...'
   $startupDir = [Environment]::GetFolderPath('Startup')
   $vbsPath = Join-Path $startupDir 'dsh-pet-client.vbs'
   $svcPath = Join-Path $Root 'scripts\dsh-service.ps1'
@@ -112,16 +170,20 @@ ws.Run "powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""$svcPath"" sta
   Write-Host ('  已写入: ' + $vbsPath)
 }
 
-# ---------- 可选：立即启动 ----------
+# ---------- 可选：立即启动服务 ----------
 if ($Start) {
   Write-Host ''
   Write-Host '启动服务 ...'
   & (Join-Path $Root 'scripts\dsh-service.ps1') start
+  Write-Host ''
+  Write-Host '界面地址: http://127.0.0.1:3080'
 }
 
 Write-Host ''
 Write-Host '完成。常用命令：'
-Write-Host ('  status   : ' + (Join-Path $Root 'scripts\dsh-service.ps1') + ' status')
-Write-Host ('  restart  : ' + (Join-Path $Root 'scripts\dsh-service.ps1') + ' restart')
-Write-Host ('  切模式   : ' + (Join-Path $Root 'scripts\dsh-mode.ps1') + ' clean|full|status')
-Write-Host ('  同步插件 : ' + (Join-Path $Root 'scripts\sync-plugins.ps1') + ' [-Check]（改完 plugins\ 源码后跑）')
+Write-Host ('  status    : ' + (Join-Path $Root 'scripts\dsh-service.ps1') + ' status')
+Write-Host ('  restart   : ' + (Join-Path $Root 'scripts\dsh-service.ps1') + ' restart')
+Write-Host ('  切模式    : ' + (Join-Path $Root 'scripts\dsh-mode.ps1') + ' clean|full|status')
+Write-Host ('  同步插件  : ' + (Join-Path $Root 'scripts\sync-plugins.ps1') + ' [-Check]')
+Write-Host ('  编译客户端: ' + (Join-Path $Root 'scripts\build-client.ps1'))
+Write-Host ('  打包发布  : ' + (Join-Path $Root 'scripts\pack-share.ps1'))
