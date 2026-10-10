@@ -32,7 +32,7 @@ $Base = 'DSH-Pet-Client-Win-' + $Version
 $Zip  = Join-Path $OutDir ($Base + '-share.zip')
 
 # ---------- 0. 客户端 exe ----------
-$exe = Join-Path $Root 'client\dsh_client_full.exe'
+$exe = Join-Path $Root 'client\dsh-pet.exe'
 if (-not (Test-Path $exe)) {
   if ($SkipBuild) { Write-Error ('缺少客户端 exe: ' + $exe + '（去掉 -SkipBuild 可自动编译）'); exit 1 }
   Write-Host '[0/5] 客户端 exe 不存在，先编译 ...'
@@ -59,9 +59,9 @@ try {
   Write-Host ('  ' + $files.Count + ' 个文件')
 
   Write-Host '[2/5] 补充发布必需的未跟踪文件 ...'
-  $exeDst = Join-Path $pkg 'client\dsh_client_full.exe'
+  $exeDst = Join-Path $pkg 'client\dsh-pet.exe'
   Copy-Item $exe $exeDst -Force
-  Write-Host '  + client\dsh_client_full.exe（编译产物，随包分发，用户无需自行编译）'
+  Write-Host '  + client\dsh-pet.exe（编译产物，随包分发，用户无需自行编译）'
 
   Write-Host '[3/5] 敏感内容扫描 ...'
   $patterns = @(

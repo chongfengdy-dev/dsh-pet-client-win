@@ -1,8 +1,8 @@
 ﻿<#
-  build-client.ps1 — 编译托盘客户端 dsh_client_full.exe
+  build-client.ps1 — 编译托盘客户端 dsh-pet.exe
   （Nim + winim，MinGW 静态链接 → 单文件、零 DLL 依赖）
 
-  产物：client\dsh_client_full.exe
+  产物：client\dsh-pet.exe
         exe 外壳图标（icon.res）与托盘四色图标（assets\*.ico 编译期 staticRead）均已内嵌。
 
   前提：
@@ -25,7 +25,7 @@ $ErrorActionPreference = 'Stop'
 
 $Root   = Split-Path -Parent $PSScriptRoot
 $Client = Join-Path $Root 'client'
-$NimSrc = Join-Path $Client 'dsh_client_full.nim'
+$NimSrc = Join-Path $Client 'dsh_pet.nim'
 
 if (-not (Test-Path $NimSrc)) { Write-Error ('缺少客户端源码: ' + $NimSrc); exit 1 }
 
@@ -70,7 +70,7 @@ if (Test-Path $iconRes) {
 } else {
   Write-Warning '缺少 icon.res —— exe 外壳图标会用默认（托盘图标不受影响）'
 }
-$nimArgs += 'dsh_client_full.nim'
+$nimArgs += @('--out:dsh-pet.exe', 'dsh_pet.nim')
 
 Push-Location $Client
 try {
@@ -82,7 +82,7 @@ try {
   Pop-Location
 }
 
-$exe = Join-Path $Client 'dsh_client_full.exe'
+$exe = Join-Path $Client 'dsh-pet.exe'
 if (Test-Path $exe) {
   $i = Get-Item $exe
   Write-Host ''

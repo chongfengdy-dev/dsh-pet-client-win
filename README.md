@@ -31,7 +31,7 @@
 
 | 功能 | 说明 |
 |---|---|
-| **托盘客户端** | `dsh_client_full.exe`（Nim + winim，单文件、零 DLL）：托盘四色状态灯，左键呼出 / 最小化对话窗口 |
+| **托盘客户端** | `dsh-pet.exe`（Nim + winim，单文件、零 DLL）：托盘四色状态灯，左键呼出 / 最小化对话窗口 |
 | **四色状态灯** | 蓝 = 窗口可见 ｜ 黑 = 收起 / 最小化 ｜ 橙闪 = 有提问或审批待处理 ｜ 绿闪 = 刚回复完；数据来自 `%USERPROFILE%\pet-state.json` |
 | **对话界面** | 浏览器 / PWA 打开 `http://127.0.0.1:3080`（dsh web，profile: web） |
 | **内嵌终端** | 页面右侧按钮开合，直连 3081 的 WebSocket；Windows 下开出的是 **PowerShell**（可用 `DSH_TERM_SHELL` 换成 `pwsh.exe` / `cmd.exe` 等） |
@@ -47,7 +47,7 @@
 ```mermaid
 graph TD
     subgraph Windows 原生
-        A[dsh_client_full.exe<br/>托盘四色状态灯] -->|读 pet-state.json| D[%USERPROFILE%\pet-state.json]
+        A[dsh-pet.exe<br/>托盘四色状态灯] -->|读 pet-state.json| D[%USERPROFILE%\pet-state.json]
         A -->|呼出 / 最小化| B[PWA / 浏览器窗口<br/>http://127.0.0.1:3080]
         B --> C[dsh-term-panels 插件<br/>终端面板 / Token HUD /<br/>消息大纲 / 已归档会话]
         E[dsh web :3080<br/>dsh --profile web] --> B
@@ -75,8 +75,8 @@ PowerShell PTY、聚合会话记录、代理平台用量接口 → 宠物状态�
 DSH-Pet-Client-Win-v1.0/
 ├─ 安装.bat                  ★ 双击即装（等价于 scripts\install.ps1 -Start）
 ├─ client/                   托盘客户端
-│  ├─ dsh_client_full.exe    编译产物（发布包自带，免编译）
-│  ├─ dsh_client_full.nim    源码（仅依赖 winim 与标准库）
+│  ├─ dsh-pet.exe    编译产物（发布包自带，免编译）
+│  ├─ dsh-pet.nim    源码（仅依赖 winim 与标准库）
 │  ├─ assets/                图标资源（编译期 staticRead 内嵌，11 个文件）
 │  └─ icon.rc · icon.res     exe 外壳图标资源
 ├─ scripts/
@@ -180,7 +180,7 @@ scripts\sync-plugins.ps1 -Check             # 只体检插件是否滞后，不�
 
 ### 客户端：通常不需要编译
 
-发布包里已带 `client\dsh_client_full.exe`。只有改源码或想自己出包时才需要：
+发布包里已带 `client\dsh-pet.exe`。只有改源码或想自己出包时才需要：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\build-client.ps1          # 编译

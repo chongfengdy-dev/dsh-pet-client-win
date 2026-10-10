@@ -11,11 +11,18 @@ import strutils, os, math, random
 proc timeBeginPeriod(uPeriod: uint32): uint32 {.stdcall, dynlib: "winmm.dll", importc.}
 proc timeEndPeriod(uPeriod: uint32): uint32 {.stdcall, dynlib: "winmm.dll", importc.}
 
-# 调试日志（写到 exe 同目录，随程序移动；正常使用无感）
+# 调试日志（写到 <用户目录>\.dsh\ 下 —— 2026-10-10 主定：日志别落桌面，
+# 与 dsh 的其他运行数据放在一起；家目录不可用时回落 exe 同目录）
 proc dbg(msg: string) =
   ## 2026-10-07：加 256KB 上限——状态变化每次都会写一行，长期运行会无限增长；
   ## 超过上限就清空重来（这是排查用的临时日志，不需要历史累积）。
-  let p = getAppDir() & "\\dsh-client-debug.log"
+  let dir = getEnv("USERPROFILE") & "\\.dsh"
+  if not dirExists(dir):
+    try: createDir(dir)
+    except CatchableError: discard
+  var p = dir & "\\dsh-client-debug.log"
+  if not dirExists(dir):
+    p = getAppDir() & "\\dsh-client-debug.log"
   try:
     if fileExists(p) and getFileSize(p) > 256 * 1024:
       writeFile(p, "")

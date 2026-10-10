@@ -105,23 +105,34 @@ if (-not (Test-Path $webProfile)) {
 
 # ---------- 5. 客户端 ----------
 Write-Host '[5/6] 部署托盘客户端 ...'
-$exeSrc = Join-Path $Root 'client\dsh_client_full.exe'
+$exeSrc = Join-Path $Root 'client\dsh-pet.exe'
 if (-not (Test-Path $exeSrc)) {
   Write-Warning '  未找到客户端 exe（源码在 client\）—— 发布包应当自带；自行编译可跑 scripts\build-client.ps1'
 } else {
   $desktop = [Environment]::GetFolderPath('Desktop')
   # 客户端 exe 直接放桌面根目录，不建子文件夹（主 2026-10-10 定）。
   # 桌面不可用时回落到项目内 client\。
-  $exeDst = if ($desktop) { Join-Path $desktop 'dsh_client_full.exe' } else { Join-Path $Root 'client\dsh_client_full.exe' }
-  # 早期版本部署在 桌面\DSH-Pet-Client\ 下；换位置后清掉旧副本，避免两个 exe 并存。
-  $legacyExe = if ($desktop) { Join-Path $desktop 'DSH-Pet-Client\dsh_client_full.exe' } else { $null }
+  $exeDst = if ($desktop) { Join-Path $desktop 'dsh-pet.exe' } else { Join-Path $Root 'client\dsh-pet.exe' }
 
-  # 覆盖前先结束正在运行的客户端：exe 被占用时无法替换（升级/重装必踩），
-  # 记下它本来在运行，替换完再拉起来，用户无感。
-  $wasRunning = [bool](Get-Process dsh_client_full -ErrorAction SilentlyContinue)
+  # 历史遗留副本：旧位置 桌面\DSH-Pet-Client\ 与旧文件名 dsh_client_full.exe，部署后一并清理
+  $legacyExes = @()
+  if ($desktop) {
+    $legacyExes += (Join-Path $desktop 'DSH-Pet-Client\dsh_client_full.exe')
+    $legacyExes += (Join-Path $desktop 'DSH-Pet-Client\dsh-pet.exe')
+    $legacyExes += (Join-Path $desktop 'dsh_client_full.exe')
+  }
+
+  # 覆盖前先结束正在运行的客户端：exe 被占用时无法替换（升级/重装必踩）。
+  # 这里用 Get-Process + Kill()，不用 taskkill —— 后者在进程不存在时会往 stderr 写
+  # 「not found」，在 $ErrorActionPreference='Stop' 下会被当成错误而中断整个脚本。
+  # 新旧进程名都要处理；记下它本来在运行，替换完再拉起来，用户无感。
+  $running = @(Get-Process dsh-pet, dsh_client_full -ErrorAction SilentlyContinue)
+  $wasRunning = $running.Count -gt 0
   if ($wasRunning) {
     Write-Host '  客户端正在运行，先结束它以便替换 ...'
-    & taskkill.exe /IM dsh_client_full.exe /F 2>&1 | Out-Null
+    foreach ($proc in $running) {
+      try { $proc.Kill(); [void]$proc.WaitForExit(3000) } catch { }
+    }
     Start-Sleep -Seconds 2
   }
 
@@ -132,9 +143,11 @@ if (-not (Test-Path $exeSrc)) {
     Write-Warning ('  客户端复制失败（可能仍被占用）：' + $_.Exception.Message)
   }
 
-  if ($legacyExe -and ($legacyExe -ne $exeDst) -and (Test-Path $legacyExe)) {
-    Remove-Item $legacyExe -Force -ErrorAction SilentlyContinue
-    Write-Host ('  已清理旧位置副本: ' + $legacyExe)
+  foreach ($lg in $legacyExes) {
+    if ($lg -and ($lg -ne $exeDst) -and (Test-Path $lg)) {
+      Remove-Item $lg -Force -ErrorAction SilentlyContinue
+      Write-Host ('  已清理历史副本: ' + $lg)
+    }
   }
 
   if ($wasRunning) {
@@ -147,10 +160,16 @@ if (-not (Test-Path $exeSrc)) {
   } else {
     $runKey  = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     $desired = '"' + $exeDst + '"'
-    $current = (Get-ItemProperty $runKey -Name 'DSH-Nim-Client' -ErrorAction SilentlyContinue).'DSH-Nim-Client'
+    # exe 改名 dsh-pet 后自启值名统一为 DSH-Pet；顺手清掉旧值名 DSH-Nim-Client
+    $oldVal = (Get-ItemProperty $runKey -Name 'DSH-Nim-Client' -ErrorAction SilentlyContinue).'DSH-Nim-Client'
+    if ($oldVal) {
+      Remove-ItemProperty $runKey -Name 'DSH-Nim-Client' -Force -ErrorAction SilentlyContinue
+      Write-Host '  已移除旧自启项（DSH-Nim-Client）'
+    }
+    $current = (Get-ItemProperty $runKey -Name 'DSH-Pet' -ErrorAction SilentlyContinue).'DSH-Pet'
     if ($current -ne $desired) {
-      Set-ItemProperty $runKey -Name 'DSH-Nim-Client' -Value $desired -Force
-      Write-Host '  已注册客户端开机自启（HKCU Run → DSH-Nim-Client）'
+      Set-ItemProperty $runKey -Name 'DSH-Pet' -Value $desired -Force
+      Write-Host '  已注册客户端开机自启（HKCU Run → DSH-Pet）'
     } else {
       Write-Host '  客户端开机自启已存在'
     }
