@@ -109,7 +109,15 @@ if (-not (Test-Path $webProfile)) {
 }
 
 if (Test-Path $webProfile) {
-  if (Test-Path $syncScript) { & $syncScript } else { Write-Warning ('  未找到同步脚本: ' + $syncScript) }
+  if (Test-Path $syncScript) {
+    & $syncScript
+    # 插件是刚写进 profile 的，而 dsh web 在同步之前就已启动 —— 必须重启一次才会加载它们，
+    # 否则用户打开页面依然看不到终端 / HUD / 大纲 / 已归档。
+    Write-Host '  重启 dsh web 让插件生效 ...'
+    & (Join-Path $Root 'scripts\dsh-service.ps1') restart web
+  } else {
+    Write-Warning ('  未找到同步脚本: ' + $syncScript)
+  }
 } else {
   Write-Warning '  跳过插件同步（profile 仍不存在）'
 }
