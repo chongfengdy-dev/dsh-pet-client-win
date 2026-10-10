@@ -95,12 +95,23 @@ Write-Host '[4/6] 同步本地插件到 web profile ...'
 $syncScript = Join-Path $Root 'scripts\sync-plugins.ps1'
 $dshHome    = if ($env:DSH_HOME) { $env:DSH_HOME } else { Join-Path $env:USERPROFILE '.dsh' }
 $webProfile = Join-Path $dshHome 'profiles\web'
+
 if (-not (Test-Path $webProfile)) {
-  Write-Warning '  web profile 尚不存在 —— 先启动一次 dsh web（scripts\dsh-service.ps1 start web），再跑 scripts\sync-plugins.ps1'
-} elseif (Test-Path $syncScript) {
-  & $syncScript
+  # 全新安装时 profile 还不存在（dsh web 从没跑过），插件没有落地的地方。
+  # 先拉起一次 dsh web 让它生成 profile，再同步插件 —— 否则用户装完打开页面
+  # 会发现没有终端 / Token HUD / 大纲 / 已归档（那几个功能都在插件里）。
+  Write-Host '  web profile 尚未生成，先启动一次 dsh web（首次要编译前端，可能一两分钟）...'
+  & (Join-Path $Root 'scripts\dsh-service.ps1') start web
+  $deadline = (Get-Date).AddSeconds(150)
+  while ((Get-Date) -lt $deadline -and -not (Test-Path $webProfile)) { Start-Sleep -Seconds 3 }
+  if (Test-Path $webProfile) { Write-Host '  profile 已生成' }
+  else { Write-Warning '  等待 profile 超时 —— 稍后可手动跑 scripts\sync-plugins.ps1 补装插件' }
+}
+
+if (Test-Path $webProfile) {
+  if (Test-Path $syncScript) { & $syncScript } else { Write-Warning ('  未找到同步脚本: ' + $syncScript) }
 } else {
-  Write-Warning ('  未找到同步脚本: ' + $syncScript)
+  Write-Warning '  跳过插件同步（profile 仍不存在）'
 }
 
 # ---------- 5. 客户端 ----------
