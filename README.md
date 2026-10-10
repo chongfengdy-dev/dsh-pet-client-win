@@ -77,7 +77,7 @@ DSH-Pet-Client-Win-v1.0/
 ├─ client/                   托盘客户端
 │  ├─ dsh-pet.exe    编译产物（发布包自带，免编译）
 │  ├─ dsh-pet.nim    源码（仅依赖 winim 与标准库）
-│  ├─ assets/                图标资源（编译期 staticRead 内嵌，11 个文件）
+│  ├─ assets/                图标资源（编译期 staticRead 内嵌的 4 个托盘图标 .ico）
 │  └─ icon.rc · icon.res     exe 外壳图标资源
 ├─ scripts/
 │  ├─ install.ps1            部署：Node → dsh(缺失自动装) → 依赖 → 插件 → 客户端 → 自启
