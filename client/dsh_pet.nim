@@ -812,17 +812,10 @@ proc floatInit() =
     echo "[DSH-Nim] 悬浮图标已就绪 (v7 像素渲染)"
 
 # ---------- 开机自启 ----------
-
-proc setupAutostart() =
-  let exePath = getAppFilename().replace("/", "\\")
-  let regKey = "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
-  var hKey: HKEY
-  if RegOpenKeyExW(HKEY_CURRENT_USER, regKey.cstring, 0, KEY_SET_VALUE, hKey.addr) == ERROR_SUCCESS:
-    discard RegSetValueExW(hKey, "DSH-Nim-Client".cstring, 0, REG_SZ,
-                           cast[LPCBYTE](exePath.cstring),
-                           DWORD(exePath.len + 1) * 2)
-    discard RegCloseKey(hKey)
-    echo "[自启] 已注册开机自启: ", exePath
+# 2026-10-10 主：整段移除 —— 客户端不再自己写 HKCU Run。
+# 原实现除了重复注册（install.ps1 也写了一份），还用 ANSI cstring 去调 W 版
+# RegSetValueExW，写进注册表的值本身就是乱码（无效路径）。
+# 开机自启现在只保留服务那一条，由 install.ps1 写入「启动」文件夹的 vbs 负责。
 
 proc fetchPetState(): int =
   ## 读 Windows 侧本地状态文件（终端服务写入），返回 0=蓝 1=黑 2=橙 3=绿。
@@ -881,8 +874,9 @@ when isMainModule:
   # 本实例为唯一实例：创建激活事件（auto-reset），主循环轮询接收"呼出"请求
   gActivateEvent = CreateEventW(nil, FALSE, FALSE, newWideCString(ActivateEventName))
 
-  setupAutostart()
-  dbg("autostart ok")
+  # 2026-10-10 主：客户端不再注册开机自启 —— 重启后只自动拉起服务
+  # （见「启动」文件夹的 dsh-pet-client.vbs），托盘客户端由主手动开启。
+  dbg("autostart skipped by user request")
 
   # 创建宿主窗口（托盘载体）
   gHostHwnd = createHostWindow()
