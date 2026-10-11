@@ -1,4 +1,4 @@
-<#
+﻿<#
   pack-share.ps1 — 打包发布 zip（Windows 版，对标 WSL 侧的 pack-share.sh）
 
   设计原则（都是踩过坑的）：

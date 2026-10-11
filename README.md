@@ -1,4 +1,4 @@
-# DSH-Pet-Client-Win
+﻿# DSH-Pet-Client-Win
 
 **Windows 原生版 DeepSeek Harness pet 客户端** —— 托盘客户端 + 界面后端 + 终端/HUD 服务
 完整一套，全部跑在 Windows 原生环境，**不依赖 WSL**。
