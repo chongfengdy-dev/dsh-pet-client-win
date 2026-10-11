@@ -1,4 +1,4 @@
-﻿# DSH-Pet-Client-Win
+# DSH-Pet-Client-Win
 
 **Windows 原生版 DeepSeek Harness pet 客户端** —— 托盘客户端 + 界面后端 + 终端/HUD 服务
 完整一套，全部跑在 Windows 原生环境，**不依赖 WSL**。
@@ -72,7 +72,7 @@ PowerShell PTY、聚合会话记录、代理平台用量接口 → 宠物状态�
 ## 四、目录结构
 
 ```
-DSH-Pet-Client-Win-v1.0/
+DSH-Pet-Client-Win-v1.1/
 ├─ 安装.bat                  ★ 双击即装（等价于 scripts\install.ps1 -Start）
 ├─ client/                   托盘客户端
 │  ├─ dsh-pet.exe    编译产物（发布包自带，免编译）
@@ -118,7 +118,7 @@ DSH-Pet-Client-Win-v1.0/
 ### 三步装好（推荐）
 
 ```
-1. 解压   DSH-Pet-Client-Win-v1.0-share.zip
+1. 解压   DSH-Pet-Client-Win-v1.1-share.zip
 2. 双击   安装.bat
 3. 打开   http://127.0.0.1:3080
 ```
@@ -230,6 +230,7 @@ powershell -ExecutionPolicy Bypass -File scripts\pack-share.ps1 -Version v1.1   
 
 | 版本 | 日期 | 说明 |
 |---|---|---|
+| **v1.1** | 2026-10-11 | **任务栏提醒**：提问（橙）与托盘同频闪烁（400ms 相位），回复完成（绿）让对话窗口的任务栏按钮保持「活动」外观，离开绿色即收；彩色角标受 `ITaskbarList3.SetOverlayIcon` 跨进程限制（MSDN：hwnd 必须属于调用进程），实测失败后自动降级，不影响托盘。**托盘菜单闭环**：新增「启用 / 停服务」，模式切换改调 Windows 版脚本，停服务时连进程树一起收干净，客户端脱离 dsh 进程组；开机只自启服务，托盘客户端改为手动开启；修复开机自启 vbs 的 UTF-8 BOM 编码 bug（VBScript 报 800A0408）。 |
 | **v1.0** | 2026-10-10 | 首个 Windows 原生版本。后端（dsh web 3080 + terminal-server 3081）完成原生化并接管标准端口，terminal-server 零 Python 依赖（classic-level 读 token、Node 多帧 zstd 统计词元）；PowerShell 服务层（`dsh-service.ps1`）替代 systemd；**托盘客户端源码与资源并入本仓库**，发布包自带编译好的 exe（`pack-share.ps1` 一键出包）；`安装.bat` + `install.ps1` 做到下载即用（缺 dsh 自动安装、插件自动同步、客户端自动部署并注册自启）；平台 token 缺失自愈（HUD 金额不再空）；一键更新改为异步重启。 |
 
 ## 九、许可证

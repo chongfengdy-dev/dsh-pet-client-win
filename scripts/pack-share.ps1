@@ -1,4 +1,4 @@
-﻿<#
+<#
   pack-share.ps1 — 打包发布 zip（Windows 版，对标 WSL 侧的 pack-share.sh）
 
   设计原则（都是踩过坑的）：
@@ -10,14 +10,14 @@
     4. 客户端 exe 不存在时先自动编译（除非 -SkipBuild）。
 
   用法：
-    pack-share.ps1                          打包 v1.0 到桌面
+    pack-share.ps1                          打包 v1.1 到桌面
     pack-share.ps1 -Version v1.1            指定版本号
     pack-share.ps1 -OutDir D:\out           指定输出目录
     pack-share.ps1 -SkipBuild               不自动编译（要求 exe 已存在）
 #>
 [CmdletBinding()]
 param(
-  [string]$Version = 'v1.0',
+  [string]$Version = 'v1.1',
   [string]$OutDir  = '',
   [switch]$SkipBuild
 )
