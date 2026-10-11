@@ -5,6 +5,7 @@
 # (鲸鱼用途=提醒干活进度)。L 手势/窗口重建/token 交换等壳层逻辑全部移除。
 import winim
 import winim/inc/shellapi
+import winim/inc/objbase   # CoInitializeEx / CoCreateInstance / CLSCTX / COINIT（任务栏 ITaskbarList3 用）
 import strutils, os, math, random, net as dshnet
 
 # winmm 高精度定时器（winim 未封装，手动声明；60fps 动画需要）
@@ -481,6 +482,8 @@ var
   gPetBaseColor = 0         # 基态色（v2.2.1：dsh 窗口可见=蓝0 / 最小化或未开=黑1）——提问闪烁交替用
   gPetBlinkOn = true        # 橙心跳闪烁相位（信号色/基态交替）
   gPetBlinkTick: int64 = 0  # 心跳计时
+  gFlashTick: int64 = 0     # 任务栏闪烁计时（提问用，与托盘心跳分开计时）
+  gFlashPersistent = false  # 回复完成是否已开持续闪（TIMERNOFG），用于离开绿色时 STOP
   gDshWinTick: int64 = 0    # dsh 窗口状态轮询计时（命中后 50ms 快查 / 未命中 1s 枚举）
   gDshHwnd: HWND = 0        # 命中的 dsh 对话窗口句柄缓存（避免反复全系统 EnumWindows）
   gDshMinimized = true      # dsh 对话窗口(PWA)收起态（最小化或未开；启动默认收起=黑）
@@ -507,6 +510,86 @@ proc applyPetIconColor() =
     discard Shell_NotifyIconW(NIM_MODIFY, gTrayData.addr)
     if oldT != 0: discard DestroyIcon(oldT)
   # v2.2：无 WebView 主窗口，任务栏图标逻辑移除（托盘图标即唯一状态灯）
+
+# ---------- 任务栏按钮：彩色 overlay + 同频闪烁（2026-10-10 主定） ----------
+# 主 2026-10-10 需求：①与托盘同频率闪 ②颜色用托盘定义的色 ③连标题栏一起闪 ④不做前台判断
+# 说明：pet 自身两个窗口是 HWND_MESSAGE / WS_EX_TOOLWINDOW，任务栏本就没有按钮；
+# 任务栏上那条「DeepSeek Harness」是 dsh 对话窗口（PWA 独立窗口，或浏览器里打开的 3080，
+# 由 findDshWindow 命中并缓存在 gDshHwnd），故 overlay 与闪烁都作用于它。
+var
+  gTaskbar: ptr ITaskbarList3 = nil
+  gTaskbarTried = false
+  gOverlayIcon: HICON = 0     # 当前 overlay 图标句柄（替换时释放旧的，防泄漏）
+  gOverlayHwnd: HWND = 0      # overlay 当前贴在哪个窗口上（对话窗口换了要重贴）
+  gOverlayColor = -1          # overlay 当前显示色（含闪烁相位算出的 dispColor）
+  gOverlayDisabled = false    # 首次失败即停用（跨进程必然 E_FAIL，见 updateTaskbarOverlay）
+
+proc taskbarGet(): ptr ITaskbarList3 =
+  ## 懒初始化 ITaskbarList3（COM）。失败返回 nil → 功能静默降级，托盘不受影响。
+  if gTaskbar != nil or gTaskbarTried: return gTaskbar
+  gTaskbarTried = true
+  discard CoInitializeEx(nil, DWORD(COINIT_APARTMENTTHREADED))
+  var clsid = CLSID_TaskbarList
+  var iid = IID_ITaskbarList3
+  var p: pointer = nil
+  if CoCreateInstance(addr clsid, nil, DWORD(CLSCTX_INPROC_SERVER), addr iid, addr p) >= 0 and p != nil:
+    gTaskbar = cast[ptr ITaskbarList3](p)
+    # ITaskbarList 系列必须先 HrInit()，否则后续方法（SetOverlayIcon 等）全部返回
+    # E_UNEXPECTED 且静默失败 —— 2026-10-10 踩坑：漏这步导致角标死活不出现。
+    let hrInit = HrInit(cast[ptr ITaskbarList](gTaskbar))
+    dbg("taskbar: ITaskbarList3 ready, HrInit=" & $hrInit)
+  else:
+    dbg("taskbar: CoCreateInstance failed, taskbar features disabled")
+  return gTaskbar
+
+proc updateTaskbarOverlay() =
+  ## 在任务栏按钮右下角贴当前状态色的鲸鱼小图标（16px）。
+  ## 颜色与相位完全跟随托盘：dispColor 与 applyPetIconColor 同一算法
+  ## （提问/完成且相位 OFF 时回落基态色，否则用 gPetColor）。
+  ## 无对话窗口或颜色无变化时直接返回 —— 每轮主循环调用也几乎零开销。
+  if gOverlayDisabled: return          # 跨进程注定失败，已停用（见下方 hrSet < 0 分支）
+  if gDshHwnd == 0: return
+  let dispColor = if gPetColor >= 2 and not gPetBlinkOn: gPetBaseColor else: gPetColor
+  if gDshHwnd == gOverlayHwnd and dispColor == gOverlayColor: return
+  let tb = taskbarGet()
+  if tb == nil: return
+  let ic = loadWhaleIcon(16, dispColor)
+  if ic == 0: return
+  # pszDescription 是 LPCWSTR：必须传宽字符指针（toW）。
+  let hrSet = tb.SetOverlayIcon(gDshHwnd, ic, toW("DSH"))
+  if hrSet < 0:
+    # MSDN 明文：本方法的 hwnd 必须属于调用进程，否则调用被忽略。dsh 对话窗口属于
+    # 浏览器进程 → 这里必然 E_FAIL（2026-10-10 实测：给记事本设角标也一样失败）。
+    # 失败一次就停用，免得每个闪烁相位都白调 COM、日志刷屏。
+    gOverlayDisabled = true
+    discard DestroyIcon(ic)
+    dbg("taskbar overlay disabled (hr=" & $hrSet & ") —— 跨进程不可用")
+    return
+  dbg("taskbar overlay -> color " & $dispColor & " hr=" & $hrSet)
+  if gOverlayIcon != 0: discard DestroyIcon(gOverlayIcon)
+  gOverlayIcon = ic
+  gOverlayHwnd = gDshHwnd
+  gOverlayColor = dispColor
+
+proc flashTaskbar() =
+  ## 闪任务栏按钮 + 标题栏（FLASHW_ALL），由调用方按 400ms 相位驱动 → 与托盘同频。
+  ## 主 2026-10-10：不做前台判断，就让它闪（窗口已在前台也闪）。
+  if gDshHwnd == 0: return
+  var fw: FLASHWINFO
+  fw.cbSize = UINT(sizeof(FLASHWINFO))
+  fw.hwnd = gDshHwnd
+  fw.dwFlags = DWORD(FLASHW_ALL)
+  fw.uCount = 1
+  fw.dwTimeout = 0
+  discard FlashWindowEx(addr fw)
+
+proc flashTaskbarPersistent(on: bool) =
+  ## 回复完成(绿)：让 dsh 对话窗口的**任务栏按钮保持"活动"外观**（常亮、不闪），
+  ## 与托盘一致（托盘绿色本来就是常亮）；离开绿色时翻转回来。
+  ## 用 FlashWindow 而非 FlashWindowEx —— 后者只有闪烁机制、做不到常亮；
+  ## MSDN：对非活动窗口调用 FlashWindow(hwnd, TRUE) 会让它"显得是活动的"，且不自恢复。
+  if gDshHwnd == 0: return
+  discard FlashWindow(gDshHwnd, WINBOOL(if on: 1 else: 0))
 
 proc floatLoadFishBins() =
   ## 加载四色鲸鱼像素（0=蓝 1=黑 2=橙 3=绿；BGRA 预乘，小端）
@@ -949,6 +1032,8 @@ when isMainModule:
           gDshMinimized = true
         else:
           gDshMinimized = IsIconic(gDshHwnd) == 1
+    # ---- 任务栏 overlay：与托盘同色（窗口刚出现/相位变化时贴，无变化时直接返回）----
+    updateTaskbarOverlay()
     # ---- 宠物颜色：提问(橙,文件) > 回复完成(绿,文件) > 基态(窗口可见=蓝/收起=黑) ----
     let pollGap = if gPetPollOk: 1000 else: 5000   # 失败拉长间隔，少打扰主循环
     if petTick - gPetPollTick > pollGap:
@@ -987,11 +1072,34 @@ when isMainModule:
       floatPaint(gFloatHwnd)
       applyPetIconColor()   # 托盘图标跟随宠物色（蓝/黑/橙/绿）
       dbg("pet color -> " & $target)
-    # 提问(橙)心跳闪烁；回复完成(绿)常亮不闪（2026-08-27 用户需求：绿不闪）
+      if gPetColor == 2:    # 刚进入提问(橙) → 任务栏立刻闪一次
+        updateTaskbarOverlay()
+        flashTaskbar()
+    # 提问(橙)心跳闪烁；回复完成(绿)托盘/鲸鱼常亮不闪（2026-08-27 主需求）
     if gPetColor == 2 and petTick - gPetBlinkTick >= 400:
       gPetBlinkTick = petTick
       gPetBlinkOn = not gPetBlinkOn
       floatPaint(gFloatHwnd)
       applyPetIconColor()
+      updateTaskbarOverlay()   # 任务栏 overlay 与托盘同相位交替
+    # ---- 任务栏提醒（2026-10-10 主定）----
+    #   提问(橙)：每 400ms 主动调闪，急促抢注意
+    #   回复完成(绿)：FLASHW_TIMERNOFG 持续闪（Windows 没有真正的"常亮高亮"，
+    #                 TIMERNOFG 是最接近的持续提醒），主点开窗口/离开绿色时 STOP 收掉
+    if gPetColor == 2:
+      if gFlashPersistent:
+        gFlashPersistent = false
+        flashTaskbarPersistent(false)
+      if petTick - gFlashTick >= 400:
+        gFlashTick = petTick
+        flashTaskbar()
+    elif gPetColor == 3:
+      if not gFlashPersistent:
+        gFlashPersistent = true
+        flashTaskbarPersistent(true)
+    else:
+      if gFlashPersistent:
+        gFlashPersistent = false
+        flashTaskbarPersistent(false)
 
     sleep(FLOAT_ANIM_MS)
